@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">PermissionDemo</string>
+    <string name="permission_tip">在设置-应用-权限中开启%1$s权限，以保证功能的正常使用</string>
 </resources>

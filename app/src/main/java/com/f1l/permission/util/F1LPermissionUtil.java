@@ -2,12 +2,22 @@ package com.f1l.permission.util;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
+import android.provider.Settings;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.PermissionChecker;
+import android.support.v7.app.AlertDialog;
+import android.util.Log;
 import android.widget.Toast;
+
+import com.f1l.permission.R;
+
+import java.util.ArrayList;
 
 /**
  * Created by songxd
@@ -27,13 +37,22 @@ public class F1LPermissionUtil {
                                          PermissionHandler handler) {
         if (handler == null) new RuntimeException("permission handler is null");
         if (!isNeedCheck()) {
-            handler.onGranted(permsRequestCode);
+            onGranted(context,permsRequestCode,handler);
             return;
         }
-        if (hasSelfPermissions(context, permissions)) {
-            handler.onGranted(permsRequestCode);
+        ArrayList<String> rPermissions = new ArrayList<>(); //未通过的权限集合
+        {
+            //通过的权限不需要再申请了,把未通过的存入新的集合
+            for (String permission : permissions) {
+                if (!hasSelfPermissions(context, permission)) {
+                    rPermissions.add(permission);
+                }
+            }
+        }
+        if (rPermissions.size() == 0) {
+            onGranted(context,permsRequestCode,handler);
         } else {
-            ActivityCompat.requestPermissions(context, permissions, permsRequestCode);
+            ActivityCompat.requestPermissions(context, rPermissions.toArray(new String[rPermissions.size()]), permsRequestCode);
         }
     }
 
@@ -45,24 +64,28 @@ public class F1LPermissionUtil {
         if (handler == null) new RuntimeException("permission handler is null");
 
         if (verifyPermissions(grantResults)) {
-            handler.onGranted(permsRequestCode);
+            onGranted(context,permsRequestCode,handler);
         } else {
             if (shouldShowRequestPermissionRationale(context, permissions)) {
-                handler.onDenied(permsRequestCode);
+                onDenied(context,permsRequestCode,handler);
             } else {
-                handler.onNeverAsk(permsRequestCode);
+                onNeverAsk(context,permsRequestCode,permissions,handler);
             }
         }
     }
 
+    private static boolean hasSelfPermissions(Context context, String permission) {
+        return PermissionChecker.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED;
+    }
 
     private static boolean hasSelfPermissions(Context context, String... permissions) {
+        boolean hasSelfPermissions = true;
         for (String permission : permissions) {
             if (!(PermissionChecker.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED)) {
-                return false;
+                hasSelfPermissions = false;
             }
         }
-        return true;
+        return hasSelfPermissions;
     }
 
     private static boolean verifyPermissions(int... grantResults) {
@@ -98,15 +121,63 @@ public class F1LPermissionUtil {
 
     public interface PermissionHandler {
 
-        void onGranted(int requestCode);
+        void onGranted(int permsRequestCode);
 
-        void onDenied(int requestCode);
+        /**
+         * 多组权限申请时,只要有一个未允许就会执行
+         * @param permsRequestCode
+         * @return 为true 走使用者自定义逻辑
+         */
+        boolean onDenied(int permsRequestCode);
 
-        void onNeverAsk(int requestCode);
+        /**
+         * 多组权限申请时,未允许的权限中,全部都选择不再询问时才执行
+         * @param permsRequestCode
+         * @return 为true 走使用者自定义逻辑 默认打开权限设置提示并回调 {@link #onDenied(int)}
+         */
+        boolean onNeverAsk(int permsRequestCode);
 
     }
 
-    public static boolean isNeedCheck() {
+    private static boolean isNeedCheck() {
         return Build.VERSION.SDK_INT > Build.VERSION_CODES.LOLLIPOP_MR1;
+    }
+
+    private static void onGranted(Activity activity ,int permsRequestCode , PermissionHandler handler) {
+        handler.onGranted(permsRequestCode);
+    }
+
+    private static void onDenied(Activity activity ,int permsRequestCode , PermissionHandler handler) {
+        if (handler.onDenied(permsRequestCode)) {
+            return;
+        }
+    }
+
+    private static void onNeverAsk(final Activity activity ,final int permsRequestCode ,final String[] permissions, final PermissionHandler handler) {
+        if (handler.onNeverAsk(permsRequestCode)) {
+            return;
+        }
+        new AlertDialog.Builder(activity)
+                .setTitle("权限申请")
+                .setMessage(String.format(activity.getResources().getString(R.string.permission_tip),PermissionTip.buildTip(permissions)))
+                .setPositiveButton("去开启", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                        Uri uri = Uri.fromParts("package", activity.getPackageName(), null);
+                        intent.setData(uri);
+                        activity.startActivity(intent);
+                        dialog.dismiss();
+                    }
+                })
+                .setNegativeButton("取消", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        handler.onDenied(permsRequestCode);
+                    }
+                })
+                .setCancelable(false)
+                .show();
+
     }
 }
